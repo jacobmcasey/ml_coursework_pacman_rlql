@@ -1,6 +1,8 @@
 # mlLearningAgents.py
 # parsons/27-mar-2017
 #
+#   python pacman.py -p QLearnAgent -x 2000 -n 2010 -l smallGrid
+#
 # A stub for a reinforcement learning agent to work with the Pacman
 # piece of the Berkeley AI project:
 #
@@ -57,11 +59,11 @@ class GameStateFeatures:
 class QLearnAgent(Agent):
 
     def __init__(self,
-                 alpha: float = 0.8,
-                 epsilon: float = 1,
-                 gamma: float = 0.8,
+                 alpha: float = 0.1,
+                 epsilon: float = 0.6,
+                 gamma: float = 0.2,
                  maxAttempts: int = 100,
-                 numTraining: int = 100):
+                 numTraining: int = 1000):
         """
         These values are either passed from the command line (using -a alpha=0.5,...)
         or are set to the default values above.
@@ -128,19 +130,29 @@ class QLearnAgent(Agent):
         """
         if endState.isWin():
             # Pacman reached the goal state (ate all the food pellets)
-            return 100.0
+            print ("Winnerrrrrrrrrr25345345345")
+            return 500.0
         elif endState.isLose():
-            print ("LOOOSSSSSSSEEEEEEEEEEEEERRRRRRRRR")
             # Pacman lost the game (collided with a ghost or ran out of time)
-            return -100.0
+            return -500.0
         else:
-            # Compute the difference in the number of remaining food pellets
-            numFoodStart = startState.getNumFood()
-            numFoodEnd = endState.getNumFood()
-            foodDiff = numFoodStart - numFoodEnd
+            # Get the distance to the nearest food pellet in the start and end states
+            startFoodDist = min([util.manhattanDistance(startState.getPacmanPosition(), food) for food in startState.getFood().asList()])
+            endFoodDist = min([util.manhattanDistance(endState.getPacmanPosition(), food) for food in endState.getFood().asList()])
+            
+            # Get the distance to the nearest ghost in the end state
+            endGhostDist = min([util.manhattanDistance(endState.getPacmanPosition(), ghost) for ghost in endState.getGhostPositions()])
 
-            # Compute the reward based on the difference
-            return foodDiff * 10.0
+            # Calculate rewards based on food and ghost distances
+            foodReward = -(startFoodDist - endFoodDist) * 100.0
+            ghostReward = -200.0 if endGhostDist <= 1 else 0
+
+            # Add a small penalty for each action to encourage faster completion
+            timePenalty = -2.0
+
+            # Compute the total reward
+            print (foodReward + ghostReward + timePenalty)
+            return foodReward + ghostReward + timePenalty
 
     # WARNING: You will be tested on the functionality of this method
     # DO NOT change the function signature
@@ -207,12 +219,11 @@ class QLearnAgent(Agent):
         newQValue = currentQValue + self.alpha * (reward + self.gamma * maxNextQValue - currentQValue)
         self.qTable[(state, action)] = newQValue
 
-        print("ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ")
         # Increment the visitation count for the current state-action pair
         self.visitCount[(state, action)] = self.visitCount.get((state, action), 0) + 1
 
         # Increment episode counter
-        self.numEpisodes += 1
+        self.incrementEpisodesSoFar()
 
     # WARNING: You will be tested on the functionality of this method
     # DO NOT change the function signature
@@ -265,13 +276,12 @@ class QLearnAgent(Agent):
             The exploration value
         """
         # Calculate the current epsilon value based on the number of episodes played so far
-        epsilon = 1.0 / (1.0 + self.numEpisodes)
+        # Calculate the current epsilon value based on the number of episodes played so far
+        decay_rate = 0.99  # You can adjust this value to control the rate of decay
+        epsilon = max(0.05, decay_rate ** self.getEpisodesSoFar())
 
-        # Determine whether to explore or exploit based on the current epsilon value
-        if random.random() < epsilon:
-            return random.uniform(-1.0, 1.0)
-        else:
-            return utility
+        exploration_value = epsilon * random.uniform(0, 1.0) + (1 - epsilon) * utility
+        return exploration_value
 
     # WARNING: You will be tested on the functionality of this method
     # DO NOT change the function signature
@@ -279,45 +289,36 @@ class QLearnAgent(Agent):
         """
         Choose an action to take to maximise reward while
         balancing gathering data for learning
-
         If you wish to use epsilon-greedy exploration, implement it in this method.
         HINT: look at pacman_utils.util.flipCoin
-
         Args:
             state: the current state
-
         Returns:
             The action to take
         """
-        # The data we have about the state of the game
         legal = state.getLegalPacmanActions()
         if Directions.STOP in legal:
             legal.remove(Directions.STOP)
 
-        # logging to help you understand the inputs, feel free to remove
-        print("Legal moves: ", legal)
-        print("Pacman position: ", state.getPacmanPosition())
-        print("Ghost positions:", state.getGhostPositions())
-        print("Food locations: ")
-        print(state.getFood())
-        print("Score: ", state.getScore())
-
         stateFeatures = GameStateFeatures(state)
 
-        # Determine whether to explore or exploit based on the current epsilon value
-        if random.random() < self.epsilon:
-            # Explore by choosing a random action from the legal actions
-            return random.choice(legal)
-        else:
-            # Exploit by choosing the action with the highest Q-value
-            maxQValue = float("-inf")
-            bestAction = None
-            for action in legal:
-                qValue = self.qTable.get((stateFeatures, action), 0.0)
-                if qValue > maxQValue:
-                    maxQValue = qValue
-                    bestAction = action
-            return bestAction
+        maxUtility = float("-inf")
+        bestAction = None
+        for action in legal:
+            qValue = self.qTable.get((stateFeatures, action), 0.0)
+            counts = self.getCount(stateFeatures, action)
+            explorationValue = self.explorationFn(qValue, counts)
+            if explorationValue > maxUtility:
+                maxUtility = explorationValue
+                bestAction = action
+        action = bestAction
+
+        nextState = state.generatePacmanSuccessor(action)
+        nextStateFeatures = GameStateFeatures(nextState)
+        reward = self.computeReward(state, nextState)
+        self.learn(stateFeatures, action, reward, nextStateFeatures)
+
+        return action
 
 
     def final(self, state: GameState):
